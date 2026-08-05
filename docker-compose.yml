@@ -15,7 +15,7 @@ services:
       - app-network
 
   backend:
-    image: 9391730131/cicd-backend:latest
+    image: mhyderali004/cicd-backend:latest
     build: 
       context: ./backend
     container_name: backend
@@ -27,7 +27,7 @@ services:
       - app-network
 
   frontend:
-    image: 9391730131/cicd-frontend:latest
+    image: mhyderali004/cicd-frontend:latest
     build: 
       context: ./frontend
     container_name: frontend
