@@ -15,7 +15,7 @@ services:
       - app-network
 
   backend:
-    image: mhyderali004/cicd-backend:latest
+    image: Mhyderali004/cicd-backend:latest
     build: 
       context: ./backend
     container_name: backend
