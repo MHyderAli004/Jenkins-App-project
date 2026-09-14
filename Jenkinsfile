@@ -1,92 +1,120 @@
 pipeline {
     agent any
-    
-    tools {
-        maven 'MAVEN3'
-    }
-    
+
     environment {
-        // Variables for easy configuration
-        DOCKER_CREDS_ID = 'docker-hub-creds'
-        EC2_CREDS_ID = 'prod-ec2-key'
-        EC2_IP = '100.49.229.131'
-        EC2_USER = 'ubuntu'
+        // --- CREDENTIALS IDS (Must match what you configured in Jenkins UI) ---
+        DOCKER_CREDS_ID = 'docker-hub-credentials'
+        KUBECONFIG_CRED_ID = 'kubeconfig-file-credentials'
+        
+        // --- DOCKER HUB DETAILS ---
+        DOCKER_HUB_USER = 'mhyderali004'
+        BACKEND_IMAGE = "${DOCKER_HUB_USER}/cicd-backend"
+        FRONTEND_IMAGE = "${DOCKER_HUB_USER}/cicd-frontend"
     }
-    
+
     stages {
         stage('Checkout Code') {
             steps {
-                echo 'Source code checked out successfully from GitHub.'
+                echo 'Checking out source code from GitHub...'
+                // Checks out the repository based on the Jenkins job configuration
+                checkout scm 
             }
         }
-        
-        stage('Build') {
+
+        stage('Build Backend') {
             steps {
                 dir('backend') {
+                    echo 'Compiling the backend Java application...'
                     sh 'mvn clean compile'
-                    echo 'Backend compiled successfully.'
                 }
             }
         }
-        
-        stage('Test') {
+
+        stage('Run Tests') {
             steps {
                 dir('backend') {
+                    echo 'Running automated backend unit tests...'
                     sh 'mvn test'
-                    echo 'Automated tests passed successfully.'
                 }
             }
         }
-        
-        stage('Package') {
+
+        stage('Package Application') {
             steps {
                 dir('backend') {
-                    sh 'mvn package'
+                    echo 'Packaging the backend application into a deployable JAR...'
+                    // Skip tests here as they already passed in the previous stage
+                    sh 'mvn package -DskipTests' 
                 }
             }
         }
-        
-        stage('Docker Build') {
+
+        stage('Build Docker Images') {
             steps {
-                // Docker compose build will use the tags from docker-compose.yml
+                echo 'Building Docker images for frontend and backend via Docker Compose...'
+                // This reads your docker-compose.yml and builds the images
                 sh 'docker compose build'
-                echo 'Docker images built locally.'
             }
         }
-        
+
         stage('Push to Docker Hub') {
             steps {
-                // Log in to Docker Hub using the credentials stored in Jenkins
+                echo 'Logging into Docker Hub and pushing new images...'
                 withCredentials([usernamePassword(credentialsId: env.DOCKER_CREDS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
                     sh 'echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin'
                     
-                    // Push the newly built images to Docker Hub
+                    // Pushes the images defined in docker-compose.yml to Docker Hub
                     sh 'docker compose push'
                 }
             }
         }
-        
-        stage('Deploy to Remote EC2') {
+
+        stage('Deploy to Kubernetes') {
             steps {
-                // Use the SSH agent plugin with the EC2 private key
-                sshagent([env.EC2_CREDS_ID]) {
-                    // 1. Create a directory on the remote server
-                    sh "ssh -o StrictHostKeyChecking=no ${env.EC2_USER}@${env.EC2_IP} 'mkdir -p ~/deployment'"
+                echo 'Deploying updated images to the Kubernetes cluster...'
+                
+                // The 'withKubeConfig' step is provided by the Kubernetes CLI plugin.
+                // It securely loads your cluster credentials for the duration of this block.
+                withKubeConfig([credentialsId: env.KUBECONFIG_CRED_ID]) {
                     
-                    // 2. Securely copy the docker-compose.yml to the new EC2 server
-                    sh "scp -o StrictHostKeyChecking=no docker-compose.yml ${env.EC2_USER}@${env.EC2_IP}:~/deployment/"
+                    // 1. Apply the K8s manifests located in the k8s/ directory
+                    echo 'Applying Kubernetes manifests...'
+                    sh 'kubectl apply -f k8s/'
                     
-                    // 3. SSH into the remote server, pull the images, and start the app
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ${env.EC2_USER}@${env.EC2_IP} '
-                            cd ~/deployment &&
-                            docker compose pull &&
-                            docker compose down &&
-                            docker compose up -d
-                        '
-                    """
+                    // 2. Force a rollout restart. 
+                    // Because we use the ':latest' tag, K8s won't pull the new image automatically 
+                    // unless we force a restart of the pods.
+                    echo 'Restarting deployments to pull new images...'
+                    sh 'kubectl rollout restart deployment mysql'
+                    sh 'kubectl rollout restart deployment backend'
+                    sh 'kubectl rollout restart deployment frontend'
+                    
+                    // 3. Wait for the deployments to stabilize (ensures pods are actually running)
+                    echo 'Waiting for deployments to stabilize...'
+                    sh 'kubectl rollout status deployment/mysql --timeout=120s'
+                    sh 'kubectl rollout status deployment/backend --timeout=120s'
+                    sh 'kubectl rollout status deployment/frontend --timeout=120s'
                 }
             }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Pipeline executed successfully! Application is live on Kubernetes.'
+            // You can add Slack or Email notifications here
+            // slackSend channel: '#deployments', message: "Deployment successful: ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+        }
+        failure {
+            echo '❌ Pipeline failed. Please check the logs.'
+            // slackSend channel: '#deployments', color: 'danger', message: "Deployment failed: ${env.JOB_NAME}"
+        }
+        always {
+            echo 'Cleaning up Docker workspace to save agent disk space...'
+            sh 'docker logout'
+            // Remove dangling images and build cache
+            sh 'docker image prune -f'
+            sh 'docker builder prune -f'
         }
     }
 }
