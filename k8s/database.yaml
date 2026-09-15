@@ -23,7 +23,9 @@ kind: Deployment
 metadata:
   name: mysql
 spec:
-  replicas: 1
+  replicas: 1                       # keep it 1, forever
+  strategy:                         # ← FIX 3 here, aligned with replicas:
+    type: Recreate
   selector:
     matchLabels:
       app: mysql

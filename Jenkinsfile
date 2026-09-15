@@ -92,6 +92,15 @@ pipeline {
         }
     }
 
+    stage('Verify deployment') {
+    steps {
+        sh 'kubectl rollout status deployment/mysql    --timeout=180s'
+        sh 'kubectl rollout status deployment/backend  --timeout=180s'
+        sh 'kubectl rollout status deployment/frontend --timeout=180s'
+        sh 'kubectl get pods'
+    }
+}
+
     post {
         success {
             echo '✅ Pipeline succeeded! Application is live on Kubernetes.'
