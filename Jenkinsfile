@@ -70,23 +70,26 @@ pipeline {
             steps {
                 echo 'Deploying updated images to the Kubernetes cluster...'
 
-                // Injects the kubeconfig secret file into the KUBECONFIG env var.
-                // kubectl reads KUBECONFIG automatically - no plugin required.
+                // Injects the kubeconfig secret file into the KUBECONFIG env var
                 withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID,
                                       variable: 'KUBECONFIG')]) {
 
-                    // Apply all manifests from the k8s/ folder
+                    // 1. Apply all manifests (Deployments, Services, Secrets, PVCs, aliases)
                     sh 'kubectl apply -f k8s/'
 
-                    // Force pods to restart so they pull the newly pushed ':latest' images
-                    sh 'kubectl rollout restart deployment mysql'
-                    sh 'kubectl rollout restart deployment backend'
-                    sh 'kubectl rollout restart deployment frontend'
+                    // 2. Restart BACKEND first, then WAIT until it is fully rolled out
+                    echo 'Restarting backend and waiting for rollout...'
+                    sh 'kubectl rollout restart deployment/backend'
+                    sh 'kubectl rollout status deployment/backend --timeout=180s'
 
-                    // Wait until each deployment is stable (fails the build if pods crash)
-                    sh 'kubectl rollout status deployment/mysql    --timeout=120s'
-                    sh 'kubectl rollout status deployment/backend  --timeout=120s'
-                    sh 'kubectl rollout status deployment/frontend --timeout=120s'
+                    // 3. Only after backend is stable, restart FRONTEND and wait again
+                    echo 'Restarting frontend and waiting for rollout...'
+                    sh 'kubectl rollout restart deployment/frontend'
+                    sh 'kubectl rollout status deployment/frontend --timeout=180s'
+
+                    // NOTE: MySQL is intentionally NOT restarted here.
+                    // It is stateful, its image never changes in normal builds,
+                    // and restarting it wastes RAM and drops DB connections.
                 }
             }
         }
