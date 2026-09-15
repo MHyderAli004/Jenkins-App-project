@@ -19,7 +19,7 @@ public class App {
         Class.forName("com.mysql.cj.jdbc.Driver");
 
         Connection connection = DriverManager.getConnection(
-                "jdbc:mysql://database:3306/mydb",
+                "jdbc:mysql://mysql-service:3306/mydb",
                 "root",
                 "root"
         );
