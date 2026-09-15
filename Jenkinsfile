@@ -90,16 +90,22 @@ pipeline {
                 }
             }
         }
-    }
 
-    stage('Verify deployment') {
-    steps {
-        sh 'kubectl rollout status deployment/mysql    --timeout=180s'
-        sh 'kubectl rollout status deployment/backend  --timeout=180s'
-        sh 'kubectl rollout status deployment/frontend --timeout=180s'
-        sh 'kubectl get pods'
+        stage('Verify deployment') {
+            steps {
+                echo 'Verifying final deployment status...'
+                // Must include credentials again so kubectl can talk to the cluster
+                withCredentials([file(credentialsId: env.KUBECONFIG_CRED_ID,
+                                      variable: 'KUBECONFIG')]) {
+                    sh 'kubectl rollout status deployment/mysql    --timeout=180s'
+                    sh 'kubectl rollout status deployment/backend  --timeout=180s'
+                    sh 'kubectl rollout status deployment/frontend --timeout=180s'
+                    sh 'kubectl get pods'
+                    sh 'kubectl get svc'
+                }
+            }
+        }
     }
-}
 
     post {
         success {
